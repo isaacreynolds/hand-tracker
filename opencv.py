@@ -8,7 +8,7 @@ mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 
 hands = mp_hands.Hands(
-    max_num_hands=1,
+    max_num_hands=2,
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
 )
@@ -22,43 +22,23 @@ if ret:
 prev_x, prev_y = 0, 0
 smooth_factor = 0.2
 
-def is_index_finger_raised(hand_landmarks):
-    
-    landmarks = hand_landmarks.landmark
+drawing = False
+draw_color = (0, 255, 0)
+draw_thickness = 50  # Increase thickness for better visibility
+canvas = None
+drawings = []
 
+def is_index_finger_extended(hand_landmarks):
+    landmarks = hand_landmarks.landmark
     index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
-    index_dip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_DIP].y
+    index_mcp = landmarks[mp_hands.HandLandmark.INDEX_FINGER_MCP].y
+    return index_tip < index_mcp
 
-    middle_tip = landmarks[mp_hands.HandLandmark.MIDDLE_FINGER_TIP].y
-    ring_tip = landmarks[mp_hands.HandLandmark.RING_FINGER_TIP].y
-    pinky_tip = landmarks[mp_hands.HandLandmark.PINKY_TIP].y
-
-    is_index_extended = index_tip < index_dip
-    is_others_not_extended = (
-        index_tip < middle_tip and
-        index_tip < ring_tip and
-        index_tip < pinky_tip
-    )
-
-    return is_index_extended and is_others_not_extended
-
-def is_pinch_pose(hand_landmarks):
-    
-    landmarks = hand_landmarks.landmark
-    thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
-    index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP]
-    distance = np.sqrt((thumb_tip.x - index_tip.x) ** 2 + (thumb_tip.y - index_tip.y) ** 2)
-    return distance < 0.05
-
-def is_click_pose(hand_landmarks):
-    
-    landmarks = hand_landmarks.landmark
-    thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP]
-    index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP]
-    distance = np.sqrt((thumb_tip.x - index_tip.x) ** 2 + (thumb_tip.y - index_tip.y) ** 2)
-    return distance < 0.05
-
-dragging = False
+def draw_on_frame(frame, x, y):
+    global drawing, drawings
+    if drawing:
+        timestamp = time.time()
+        drawings.append((x, y, timestamp))
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -66,48 +46,45 @@ while cap.isOpened():
         print("Failed to grab frame. Exiting...")
         break
 
+    if canvas is None:
+        canvas = np.zeros_like(frame)
+
     frame = cv2.flip(frame, 1)
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
     hand_results = hands.process(frame_rgb)
     
-
     if hand_results.multi_hand_landmarks:
         for hand_landmarks in hand_results.multi_hand_landmarks:
-            
             index_finger_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
             x, y = int(index_finger_tip.x * w), int(index_finger_tip.y * h)
 
-            screen_width, screen_height = pyautogui.size()
-            screen_x = int(x / w * screen_width)
-            screen_y = int(y / h * screen_height)
-            smooth_x = prev_x + (screen_x - prev_x) * smooth_factor
-            smooth_y = prev_y + (screen_y - prev_y) * smooth_factor
-            pyautogui.moveTo(smooth_x, smooth_y)
-            prev_x, prev_y = smooth_x, smooth_y
-
-            if is_pinch_pose(hand_landmarks):
-                
-                if not dragging:
-                    pyautogui.mouseDown()
-                    dragging = True
+            if is_index_finger_extended(hand_landmarks):
+                drawing = True
             else:
-                if dragging:
-                    pyautogui.mouseUp()
-                    dragging = False
+                drawing = False
 
-            if is_click_pose(hand_landmarks):
-                
-                pyautogui.click()
-
+            draw_on_frame(canvas, x, y)
             mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-    cv2.imshow('Hand Tracking', frame)
+    current_time = time.time()
+    drawings = [(x, y, t) for x, y, t in drawings if current_time - t < 5]
 
-    key = cv2.waitKey(10) & 0xFF
+    for x, y, t in drawings:
+        cv2.circle(canvas, (x, y), draw_thickness, draw_color, -1)
+
+    combined_frame = cv2.addWeighted(frame, 0.5, canvas, 0.5, 0)
+    cv2.namedWindow('Hand Tracking', cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty('Hand Tracking', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.imshow('Hand Tracking', combined_frame)
+    
+    key = cv2.waitKey(1) & 0xFF
     if key == ord('q'):
         print("Exiting...")
         break
+    elif key == ord('c'):  # Clear the canvas when 'c' is pressed
+        canvas = np.zeros_like(frame)
+        drawings = []
 
 cap.release()
 cv2.destroyAllWindows()
