@@ -1,43 +1,17 @@
 import cv2
-import numpy as np
-import time
 import mediapipe as mp
+import numpy as np
+import pyautogui
+import time
 
-
+mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5)
 
-#checks for NVIDIA gpu acceleration capabilities
-if cv2.cuda.getCudaEnabledDeviceCount() > 0:
-    use_cuda = True
-    print("CUDA is available. Using GPU for processing.")
-else:
-    use_cuda = False
-    print("CUDA is not available. Using CPU for processing.")
-
-
-def draw_landmarks(frame, hand_landmarks):
-    for landmarks in hand_landmarks:
-        for i, landmark in enumerate(landmarks):
-            x, y = int(landmark[0]), int(landmark[1])
-            cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
-            if i > 0:
-                prev_x, prev_y = int(landmarks[i-1][0]), int(landmarks[i-1][1])
-                cv2.line(frame, (prev_x, prev_y), (x, y), (255, 255, 255), 2)
-
-def is_index_finger_extended(landmarks):
-    index_tip = landmarks[8][1]
-    index_mcp = landmarks[5][1]
-    return index_tip < index_mcp
-
-def draw_on_frame(frame, x, y):
-    global drawings
-    timestamp = time.time()
-    drawings.append((x, y, timestamp))
-
-def toggle_drawing():
-    global drawing
-    drawing = not drawing
+hands = mp_hands.Hands(
+    max_num_hands=2,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
 
 cap = cv2.VideoCapture(0)
 
@@ -45,12 +19,32 @@ ret, frame = cap.read()
 if ret:
     h, w, _ = frame.shape
 
+smooth_factor = 0.2
 drawing = False
-draw_enabled = True  
-draw_color = (200, 200, 0)
-draw_thickness = 5  
+draw_color = (255, 255, 255)
+draw_thickness = 15  # Increase thickness for better visibility
 canvas = None
 drawings = []
+
+def is_index_finger_extended(hand_landmarks):
+    landmarks = hand_landmarks.landmark
+    index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+    index_mcp = landmarks[mp_hands.HandLandmark.INDEX_FINGER_MCP].y
+    middle_tip = landmarks[mp_hands.HandLandmark.MIDDLE_FINGER_TIP].y
+    return index_tip < index_mcp and index_tip < middle_tip
+
+def is_thumbs_up(hand_landmarks):
+    landmarks = hand_landmarks.landmark
+    thumb_tip = landmarks[mp_hands.HandLandmark.THUMB_TIP].y
+    thumb_ip = landmarks[mp_hands.HandLandmark.THUMB_IP].y
+    index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+    return thumb_tip < thumb_ip and thumb_tip < index_tip
+
+def draw_on_frame(frame, x, y):
+    global drawing, drawings
+    if drawing:
+        timestamp = time.time()
+        drawings.append((x, y, timestamp))
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -64,34 +58,24 @@ while cap.isOpened():
     frame = cv2.flip(frame, 1)
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    if use_cuda:
-        # Upload frame to GPU
-        gpu_frame = cv2.cuda_GpuMat()
-        gpu_frame.upload(frame_rgb)
-        # Perform hand detection on GPU
-        gpu_frame_rgb = cv2.cuda.cvtColor(gpu_frame, cv2.COLOR_BGR2RGB)
-        frame_rgb = gpu_frame_rgb.download()
+    hand_results = hands.process(frame_rgb)
+    
+    if hand_results.multi_hand_landmarks:
+        for hand_landmarks in hand_results.multi_hand_landmarks:
+            index_finger_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
+            x, y = int(index_finger_tip.x * w), int(index_finger_tip.y * h)
 
-    # Perform hand detection
-    results = hands.process(frame_rgb)
-    hand_landmarks = []
-
-    if results.multi_hand_landmarks:
-        for hand_landmark in results.multi_hand_landmarks:
-            landmarks = []
-            for lm in hand_landmark.landmark:
-                landmarks.append([lm.x * w, lm.y * h])
-            hand_landmarks.append(landmarks)
-
-    if len(hand_landmarks) > 0:
-        for landmarks in hand_landmarks:
-            index_finger_tip = landmarks[8]
-            x, y = int(index_finger_tip[0]), int(index_finger_tip[1])
-
-            if draw_enabled and is_index_finger_extended(landmarks):
+            if is_thumbs_up(hand_landmarks):
+                canvas = np.zeros_like(frame)
+                drawings = []
+                drawing = False
+            elif is_index_finger_extended(hand_landmarks):
+                drawing = True
                 draw_on_frame(canvas, x, y)
+            else:
+                drawing = False
 
-        draw_landmarks(frame, hand_landmarks)
+            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
     current_time = time.time()
     drawings = [(x, y, t) for x, y, t in drawings if current_time - t < 5]
@@ -111,8 +95,7 @@ while cap.isOpened():
     elif key == ord('c'):  # Clear the canvas when 'c' is pressed
         canvas = np.zeros_like(frame)
         drawings = []
-    elif key == ord('d'):  # Toggle drawing when 'd' is pressed
-        toggle_drawing()
+        print("cleared canvas")
 
 cap.release()
 cv2.destroyAllWindows()
