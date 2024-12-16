@@ -3,11 +3,11 @@ import numpy as np
 import time
 import mediapipe as mp
 
-# Initialize Mediapipe Hand module
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.5)
 
-# Check if OpenCV is built with CUDA support
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5)
+
+#checks for NVIDIA gpu acceleration capabilities
 if cv2.cuda.getCudaEnabledDeviceCount() > 0:
     use_cuda = True
     print("CUDA is available. Using GPU for processing.")
@@ -15,14 +15,15 @@ else:
     use_cuda = False
     print("CUDA is not available. Using CPU for processing.")
 
-# Function to draw landmarks and lines on the frame
-def draw_landmarks(frame, landmarks):
-    for i, landmark in enumerate(landmarks):
-        x, y = int(landmark[0]), int(landmark[1])
-        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)  # Increase circle size for better visibility
-        if i > 0:
-            prev_x, prev_y = int(landmarks[i-1][0]), int(landmarks[i-1][1])
-            cv2.line(frame, (prev_x, prev_y), (x, y), (255, 0, 0), 2)  # Draw lines between landmarks
+
+def draw_landmarks(frame, hand_landmarks):
+    for landmarks in hand_landmarks:
+        for i, landmark in enumerate(landmarks):
+            x, y = int(landmark[0]), int(landmark[1])
+            cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+            if i > 0:
+                prev_x, prev_y = int(landmarks[i-1][0]), int(landmarks[i-1][1])
+                cv2.line(frame, (prev_x, prev_y), (x, y), (255, 255, 255), 2)
 
 def is_index_finger_extended(landmarks):
     index_tip = landmarks[8][1]
@@ -45,9 +46,9 @@ if ret:
     h, w, _ = frame.shape
 
 drawing = False
-draw_enabled = True  # Variable to track drawing state
-draw_color = (0, 255, 0)
-draw_thickness = 5  # Increase thickness for better visibility
+draw_enabled = True  
+draw_color = (200, 200, 0)
+draw_thickness = 5  
 canvas = None
 drawings = []
 
@@ -77,15 +78,18 @@ while cap.isOpened():
 
     if results.multi_hand_landmarks:
         for hand_landmark in results.multi_hand_landmarks:
+            landmarks = []
             for lm in hand_landmark.landmark:
-                hand_landmarks.append([lm.x * w, lm.y * h])
+                landmarks.append([lm.x * w, lm.y * h])
+            hand_landmarks.append(landmarks)
 
     if len(hand_landmarks) > 0:
-        index_finger_tip = hand_landmarks[8]
-        x, y = int(index_finger_tip[0]), int(index_finger_tip[1])
+        for landmarks in hand_landmarks:
+            index_finger_tip = landmarks[8]
+            x, y = int(index_finger_tip[0]), int(index_finger_tip[1])
 
-        if draw_enabled and is_index_finger_extended(hand_landmarks):
-            draw_on_frame(canvas, x, y)
+            if draw_enabled and is_index_finger_extended(landmarks):
+                draw_on_frame(canvas, x, y)
 
         draw_landmarks(frame, hand_landmarks)
 
