@@ -15,6 +15,14 @@ hands = mp_hands.Hands(
 
 cap = cv2.VideoCapture(0)
 
+# Set OpenCV to use CUDA if available
+if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+    print("CUDA is available. Using GPU acceleration.")
+    cap.set(cv2.CAP_PROP_BACKEND, cv2.CAP_FFMPEG)
+    cap.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
+else:
+    print("CUDA is not available. Using CPU.")
+
 ret, frame = cap.read()
 if ret:
     h, w, _ = frame.shape
