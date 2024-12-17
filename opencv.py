@@ -21,7 +21,16 @@ if cv2.cuda.getCudaEnabledDeviceCount() > 0:
     cap.set(cv2.CAP_PROP_BACKEND, cv2.CAP_FFMPEG)
     cap.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
 else:
-    print("CUDA is not available. Using CPU.")
+    print("CUDA is not available. Checking for Apple Silicon (Metal).")
+    try:
+        cv2.ocl.setUseOpenCL(True)
+        if cv2.ocl.haveOpenCL():
+            print("Apple Silicon (Metal) is available. Using GPU acceleration.")
+            cap.set(cv2.CAP_PROP_BACKEND, cv2.CAP_AVFOUNDATION)
+        else:
+            raise Exception("Apple Silicon (Metal) is not available.")
+    except Exception as e:
+        print(f"Apple Silicon (Metal) is not available. Using CPU. Error: {e}")
 
 ret, frame = cap.read()
 if ret:
